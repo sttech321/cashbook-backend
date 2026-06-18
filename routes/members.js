@@ -28,6 +28,14 @@ async function canReadBook(userId, businessId, bookId) {
   return rows.length > 0;
 }
 
+async function isBookAdmin(userId, bookId) {
+  const { rows } = await db.query(
+    'SELECT role FROM book_members WHERE book_id = $1 AND user_id = $2 LIMIT 1',
+    [bookId, userId]
+  );
+  return rows[0]?.role === 'Book Admin';
+}
+
 // GET /api/businesses/:businessId/cashbooks/:bookId/members
 router.get('/', auth, async (req, res) => {
   const { businessId, bookId } = req.params;
@@ -53,7 +61,14 @@ router.get('/', auth, async (req, res) => {
     };
 
     const { rows } = await db.query(
-      'SELECT * FROM book_members WHERE book_id = $1 ORDER BY created_at ASC',
+      `SELECT bm.*,
+              COALESCE(u.name, bm.name)   AS name,
+              COALESCE(u.mobile, bm.mobile) AS mobile,
+              COALESCE(u.email, bm.email)  AS email
+       FROM book_members bm
+       LEFT JOIN users u ON u.id = bm.user_id
+       WHERE bm.book_id = $1
+       ORDER BY bm.created_at ASC`,
       [bookId]
     );
 
@@ -67,11 +82,15 @@ router.get('/', auth, async (req, res) => {
 // POST /api/businesses/:businessId/cashbooks/:bookId/members
 router.post('/', auth, async (req, res) => {
   const { businessId, bookId } = req.params;
-  if (!await ownsBook(req.user.userId, businessId, bookId))
+  const userId = req.user.userId;
+  const isOwner = await ownsBook(userId, businessId, bookId);
+  if (!isOwner && !await isBookAdmin(userId, bookId))
     return res.status(403).json({ error: 'Access denied' });
 
   const { user_id, name, mobile, email, role } = req.body;
   if (!name || !role) return res.status(400).json({ error: 'name and role are required' });
+  if (!isOwner && role === 'Primary Admin')
+    return res.status(403).json({ error: 'Only the book owner can assign Primary Admin role' });
 
   const { rows: bizRows } = await db.query('SELECT user_id FROM businesses WHERE id = $1', [businessId]);
   if (bizRows[0]?.user_id === user_id)
