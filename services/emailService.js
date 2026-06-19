@@ -1,4 +1,8 @@
 const nodemailer = require('nodemailer');
+const dns = require('dns');
+
+// Force IPv4 — Render servers have broken IPv6 routing to Gmail SMTP
+dns.setDefaultResultOrder('ipv4first');
 
 // Transporter — Gmail SMTP
 const transporter = nodemailer.createTransport({
