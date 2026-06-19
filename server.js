@@ -58,11 +58,15 @@ app.use((err, req, res, next) => {
 async function start() {
   try {
     await syncAll();           // create tables + seed roles
-    await verifyConnection();  // SMTP check (best-effort)
   } catch (err) {
     console.error('[startup] DB sync failed:', err.message);
     process.exit(1);
   }
+
+  // SMTP verify — best-effort, never blocks server startup
+  verifyConnection().catch(err =>
+    console.warn('[startup] SMTP check failed (non-fatal):', err.message)
+  );
 
   const server = app.listen(PORT, '0.0.0.0', () => {
     console.log(`\n[server] CashBook API → http://0.0.0.0:${PORT}`);

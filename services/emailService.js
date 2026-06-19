@@ -16,6 +16,9 @@ const transporter = nodemailer.createTransport({
   tls: {
     rejectUnauthorized: false,
   },
+  connectionTimeout: 10000,   // 10s — prevent hanging on blocked ports
+  greetingTimeout:   10000,
+  socketTimeout:     15000,
 });
 
 // ── Connection verify karo on startup ──────────────────
