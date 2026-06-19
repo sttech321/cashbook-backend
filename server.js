@@ -11,7 +11,18 @@ const app  = express();
 const PORT = process.env.PORT || 3001;
 
 // ── Middleware ────────────────────────────────────────────────
-app.use(cors({ origin: ['http://localhost:5173', 'http://localhost:4173'], credentials: true }));
+const ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:4173',
+  'https://cashbook-mykd.onrender.com',
+];
+app.use(cors({
+  origin: (origin, cb) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: ${origin} not allowed`));
+  },
+  credentials: true,
+}));
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -53,9 +64,9 @@ async function start() {
     process.exit(1);
   }
 
-  const server = app.listen(PORT, () => {
-    console.log(`\n[server] CashBook API → http://localhost:${PORT}`);
-    console.log(`[server] Health     → http://localhost:${PORT}/api/health\n`);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n[server] CashBook API → http://0.0.0.0:${PORT}`);
+    console.log(`[server] Health     → http://0.0.0.0:${PORT}/api/health\n`);
   });
 
   server.on('error', (err) => {
