@@ -1,19 +1,36 @@
 const { Resend } = require('resend');
+const nodemailer = require('nodemailer');
 
-// Lazy init — avoid crash when RESEND_API_KEY is not set (local dev)
+// Lazy Resend init
 let _resend = null;
-function getClient() {
+function getResendClient() {
   if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
   return _resend;
 }
 
+// SMTP transporter for local dev fallback
+function getSmtpTransporter() {
+  return nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: parseInt(process.env.SMTP_PORT, 10) || 587,
+    secure: false,
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+    tls: { rejectUnauthorized: false },
+  });
+}
+
 // ── Connection verify on startup ───────────────────────
 async function verifyConnection() {
-  if (!process.env.RESEND_API_KEY) {
-    console.warn('⚠️  RESEND_API_KEY not set — emails will not be sent');
-    return;
+  if (process.env.RESEND_API_KEY) {
+    console.log('✅ Resend email service ready');
+  } else if (process.env.SMTP_USER) {
+    console.log('✅ SMTP email service ready (local dev)');
+  } else {
+    console.warn('⚠️  No email service configured (RESEND_API_KEY or SMTP_USER required)');
   }
-  console.log('✅ Resend email service ready');
 }
 
 // ── Professional OTP Email Template ───────────────────
@@ -159,18 +176,35 @@ function buildOtpText({ otp, recipient, expiryMins = 5 }) {
 // ── Main send function ─────────────────────────────────
 async function sendOtpEmail({ to, otp }) {
   const recipient = to;
-  if (!process.env.RESEND_API_KEY) throw new Error('RESEND_API_KEY not configured');
-  const { data, error } = await getClient().emails.send({
-    from: process.env.RESEND_FROM || 'CashBook <onboarding@resend.dev>',
-    to: [to],
-    subject: `${otp} is your CashBook OTP — valid for 5 minutes`,
-    text: buildOtpText({ otp, recipient }),
-    html: buildOtpHtml({ otp, recipient }),
-  });
+  const subject = `${otp} is your CashBook OTP — valid for 5 minutes`;
+  const text = buildOtpText({ otp, recipient });
+  const html = buildOtpHtml({ otp, recipient });
 
-  if (error) throw new Error(error.message);
-  console.log(`[EMAIL] OTP sent to ${to} | id: ${data.id}`);
-  return data;
+  // Production: use Resend (HTTP API — no SMTP port issues)
+  if (process.env.RESEND_API_KEY) {
+    const { data, error } = await getResendClient().emails.send({
+      from: process.env.RESEND_FROM || 'CashBook <onboarding@resend.dev>',
+      to: [to],
+      subject,
+      text,
+      html,
+    });
+    if (error) throw new Error(error.message);
+    console.log(`[EMAIL] OTP sent via Resend to ${to} | id: ${data.id}`);
+    return data;
+  }
+
+  // Local dev fallback: use Gmail SMTP
+  const transporter = getSmtpTransporter();
+  const info = await transporter.sendMail({
+    from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+    to,
+    subject,
+    text,
+    html,
+  });
+  console.log(`[EMAIL] OTP sent via SMTP to ${to} | MessageId: ${info.messageId}`);
+  return info;
 }
 
 module.exports = { sendOtpEmail, verifyConnection };

@@ -70,18 +70,18 @@ router.post('/send-otp', async (req, res) => {
     });
   } catch (err) {
     console.error('[EMAIL ERROR]', err.message);
-    // In development: SMTP failure should not block login — OTP is saved in memory
-    if (process.env.NODE_ENV !== 'production') {
-      console.log(`[DEV] Email failed but OTP is: ${otp}`);
+    // Dev fallback only when no email service is configured (no RESEND_API_KEY + no SMTP)
+    const hasEmailService = process.env.RESEND_API_KEY || process.env.SMTP_USER;
+    if (!hasEmailService) {
+      console.log(`[DEV] No email service configured. OTP: ${otp}`);
       return res.json({
         success: true,
         type,
-        message: `OTP generated (email failed — use OTP below for testing)`,
+        message: `OTP generated (no email service — check server logs)`,
         _demo_otp: otp,
-        _email_error: err.message,
       });
     }
-    return res.status(500).json({ error: 'Failed to send OTP email. Please try again.' });
+    return res.status(500).json({ error: `Email send failed: ${err.message}` });
   }
 });
 
