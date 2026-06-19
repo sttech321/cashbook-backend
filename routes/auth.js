@@ -67,7 +67,6 @@ router.post('/send-otp', async (req, res) => {
       success: true,
       type,
       message: isMobile ? `OTP sent to ${key}` : `OTP sent to ${key}. Check your inbox.`,
-      ...(process.env.NODE_ENV !== 'production' && { _demo_otp: otp }),
     });
   } catch (err) {
     console.error('[EMAIL ERROR]', err.message);

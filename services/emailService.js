@@ -2,12 +2,12 @@ const nodemailer = require('nodemailer');
 
 // Transporter — Gmail SMTP
 const transporter = nodemailer.createTransport({
-  host: process.env.MAIL_SERVER,
-  port: parseInt(process.env.MAIL_PORT, 10),
+  host: process.env.SMTP_HOST,
+  port: parseInt(process.env.SMTP_PORT, 10),
   secure: false,          // PORT 587 → STARTTLS
   auth: {
-    user: process.env.MAIL_SENDER,
-    pass: process.env.MAIL_PASSWORD,
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
   },
   tls: {
     rejectUnauthorized: false,
@@ -194,7 +194,7 @@ If you did not request this, please ignore this email.
 async function sendOtpEmail({ to, otp }) {
   const recipient = to;
   const mailOptions = {
-    from: `"CashBook" <${process.env.MAIL_SENDER}>`,
+    from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to,
     subject: `${otp} is your CashBook OTP — valid for 5 minutes`,
     text: buildOtpText({ otp, recipient }),
