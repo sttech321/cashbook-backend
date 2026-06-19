@@ -1,10 +1,7 @@
 const nodemailer = require('nodemailer');
 const dns = require('dns');
 
-// Force IPv4 — Render servers have broken IPv6 routing to Gmail SMTP
-dns.setDefaultResultOrder('ipv4first');
-
-// Transporter — Gmail SMTP
+// Transporter — Gmail SMTP (IPv4 forced via lookup — Render has broken IPv6 to Gmail)
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
   port: parseInt(process.env.SMTP_PORT, 10),
@@ -16,9 +13,15 @@ const transporter = nodemailer.createTransport({
   tls: {
     rejectUnauthorized: false,
   },
-  connectionTimeout: 10000,   // 10s — prevent hanging on blocked ports
+  connectionTimeout: 10000,
   greetingTimeout:   10000,
   socketTimeout:     15000,
+  lookup: (hostname, options, callback) => {
+    dns.resolve4(hostname, (err, addresses) => {
+      if (err) return callback(err);
+      callback(null, addresses[0], 4);  // always return IPv4
+    });
+  },
 });
 
 // ── Connection verify karo on startup ──────────────────
