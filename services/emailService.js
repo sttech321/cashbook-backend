@@ -1,14 +1,20 @@
-const { Resend } = require('resend');
 const nodemailer = require('nodemailer');
 
-// Lazy Resend init
-let _resend = null;
-function getResendClient() {
-  if (!_resend) _resend = new Resend(process.env.RESEND_API_KEY);
-  return _resend;
+// Gmail OAuth2 — production (HTTPS port 443, works on Render)
+function getOAuth2Transporter() {
+  return nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+      type: 'OAuth2',
+      user: process.env.SMTP_USER,
+      clientId: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      refreshToken: process.env.GMAIL_REFRESH_TOKEN,
+    },
+  });
 }
 
-// SMTP transporter for local dev fallback
+// Gmail SMTP — local dev only (port 587, blocked on Render)
 function getSmtpTransporter() {
   return nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -24,12 +30,12 @@ function getSmtpTransporter() {
 
 // ── Connection verify on startup ───────────────────────
 async function verifyConnection() {
-  if (process.env.RESEND_API_KEY) {
-    console.log('✅ Resend email service ready');
+  if (process.env.GMAIL_REFRESH_TOKEN) {
+    console.log('✅ Gmail OAuth2 email service ready');
   } else if (process.env.SMTP_USER) {
     console.log('✅ SMTP email service ready (local dev)');
   } else {
-    console.warn('⚠️  No email service configured (RESEND_API_KEY or SMTP_USER required)');
+    console.warn('⚠️  No email service configured');
   }
 }
 
@@ -176,25 +182,25 @@ function buildOtpText({ otp, recipient, expiryMins = 5 }) {
 // ── Main send function ─────────────────────────────────
 async function sendOtpEmail({ to, otp }) {
   const recipient = to;
-  const subject = `${otp} is your CashBook OTP — valid for 5 minutes`;
-  const text = buildOtpText({ otp, recipient });
-  const html = buildOtpHtml({ otp, recipient });
+  const subject   = `${otp} is your CashBook OTP — valid for 5 minutes`;
+  const text      = buildOtpText({ otp, recipient });
+  const html      = buildOtpHtml({ otp, recipient });
 
-  // Production: use Resend (HTTP API — no SMTP port issues)
-  if (process.env.RESEND_API_KEY) {
-    const { data, error } = await getResendClient().emails.send({
-      from: process.env.RESEND_FROM || 'CashBook <onboarding@resend.dev>',
-      to: [to],
+  // Production: Gmail OAuth2 (HTTPS — works on Render)
+  if (process.env.GMAIL_REFRESH_TOKEN) {
+    const transporter = getOAuth2Transporter();
+    const info = await transporter.sendMail({
+      from: `"CashBook" <${process.env.SMTP_USER}>`,
+      to,
       subject,
       text,
       html,
     });
-    if (error) throw new Error(error.message);
-    console.log(`[EMAIL] OTP sent via Resend to ${to} | id: ${data.id}`);
-    return data;
+    console.log(`[EMAIL] OTP sent via Gmail OAuth2 to ${to} | MessageId: ${info.messageId}`);
+    return info;
   }
 
-  // Local dev fallback: use Gmail SMTP
+  // Local dev: Gmail SMTP (port 587 — blocked on Render)
   const transporter = getSmtpTransporter();
   const info = await transporter.sendMail({
     from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
