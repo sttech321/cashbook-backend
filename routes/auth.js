@@ -70,8 +70,9 @@ router.post('/send-otp', async (req, res) => {
     });
   } catch (err) {
     console.error('[EMAIL ERROR]', err.message);
+    console.error('[EMAIL ERROR] Stack:', err.stack);
     // Dev fallback only when no email service is configured (no RESEND_API_KEY + no SMTP)
-    const hasEmailService = process.env.GMAIL_REFRESH_TOKEN || process.env.RESEND_API_KEY || process.env.SMTP_USER;
+    const hasEmailService = process.env.RESEND_API_KEY || process.env.SMTP_USER;
     if (!hasEmailService) {
       console.log(`[DEV] No email service configured. OTP: ${otp}`);
       return res.json({

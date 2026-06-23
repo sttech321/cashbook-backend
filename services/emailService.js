@@ -1,12 +1,27 @@
 const nodemailer = require('nodemailer');
 
+// ── Startup diagnostics ──
+console.log('[EMAIL-CONFIG] ──────────────────────────────────────');
+console.log('[EMAIL-CONFIG] RESEND_API_KEY:', process.env.RESEND_API_KEY ? `SET (${process.env.RESEND_API_KEY.slice(0,8)}...)` : '❌ NOT SET');
+console.log('[EMAIL-CONFIG] RESEND_FROM:   ', process.env.RESEND_FROM || '(not set — will use onboarding@resend.dev)');
+console.log('[EMAIL-CONFIG] SMTP_HOST:     ', process.env.SMTP_HOST || '(not set)');
+console.log('[EMAIL-CONFIG] SMTP_PORT:     ', process.env.SMTP_PORT || '(not set)');
+console.log('[EMAIL-CONFIG] SMTP_USER:     ', process.env.SMTP_USER ? `SET (${process.env.SMTP_USER})` : '❌ NOT SET');
+console.log('[EMAIL-CONFIG] SMTP_PASS:     ', process.env.SMTP_PASS ? 'SET (****)' : '❌ NOT SET');
+console.log('[EMAIL-CONFIG] NODE_ENV:      ', process.env.NODE_ENV || '(not set)');
+
 // ── Resend API (production — uses HTTPS, works on Render) ──
 const useResend = !!process.env.RESEND_API_KEY;
 let resend = null;
 if (useResend) {
   const { Resend } = require('resend');
   resend = new Resend(process.env.RESEND_API_KEY);
+  console.log('[EMAIL-CONFIG] ✅ Mode: RESEND API (HTTPS — works on Render)');
+} else {
+  console.log('[EMAIL-CONFIG] ⚠️  Mode: SMTP (port 587 — BLOCKED on Render!)');
+  console.log('[EMAIL-CONFIG] 💡 To fix on Render: add RESEND_API_KEY env var');
 }
+console.log('[EMAIL-CONFIG] ──────────────────────────────────────');
 
 // ── SMTP Transporter (local dev — Gmail App Password) ──
 let transporter = null;
@@ -28,18 +43,24 @@ function getTransporter() {
 // ── Connection verify on startup ───────────────────────
 async function verifyConnection() {
   if (useResend) {
-    console.log('✅ Resend email service ready (HTTPS API)');
+    console.log('✅ Resend email service ready (HTTPS API — production mode)');
     return;
   }
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.warn('⚠️  No email service configured — set RESEND_API_KEY (production) or SMTP_USER/SMTP_PASS (local)');
+    console.warn('❌ No email service configured!');
+    console.warn('   → For Render/production: set RESEND_API_KEY env var');
+    console.warn('   → For local dev: set SMTP_USER + SMTP_PASS env vars');
     return;
   }
   try {
     await getTransporter().verify();
-    console.log('✅ SMTP email service ready (local dev)');
+    console.log('✅ SMTP email service ready (local dev mode)');
   } catch (err) {
-    console.warn('⚠️  SMTP verify failed (non-fatal):', err.message);
+    console.warn('⚠️  SMTP verify failed:', err.message);
+    if (err.message.includes('ENETUNREACH') || err.message.includes('ETIMEDOUT') || err.message.includes('Connection timeout')) {
+      console.warn('   🚫 SMTP port 587 is BLOCKED on this server (Render blocks SMTP)');
+      console.warn('   💡 Fix: Set RESEND_API_KEY env var in Render dashboard → Environment');
+    }
   }
 }
 
@@ -185,6 +206,9 @@ function buildOtpText({ otp, recipient, expiryMins = 5 }) {
 
 // ── Main send function ─────────────────────────────────
 async function sendOtpEmail({ to, otp }) {
+  console.log(`[EMAIL] ── Sending OTP to: ${to} ──`);
+  console.log(`[EMAIL] Method: ${useResend ? 'RESEND API (HTTPS)' : 'SMTP (port 587)'}`);
+
   const recipient = to;
   const subject   = `${otp} is your CashBook OTP — valid for 5 minutes`;
   const text      = buildOtpText({ otp, recipient });
@@ -193,28 +217,51 @@ async function sendOtpEmail({ to, otp }) {
   // ── Production: Resend API (HTTPS — works on Render) ──
   if (useResend) {
     const fromAddr = process.env.RESEND_FROM || 'onboarding@resend.dev';
-    const { data, error } = await resend.emails.send({
-      from: `CashBook <${fromAddr}>`,
-      to: [to],
+    console.log(`[EMAIL] Resend from: ${fromAddr} → to: ${to}`);
+    try {
+      const { data, error } = await resend.emails.send({
+        from: `CashBook <${fromAddr}>`,
+        to: [to],
+        subject,
+        text,
+        html,
+      });
+      if (error) {
+        console.error(`[EMAIL] ❌ Resend API error:`, JSON.stringify(error));
+        throw new Error(error.message || 'Resend API error');
+      }
+      console.log(`[EMAIL] ✅ OTP sent via Resend to ${to} | Id: ${data.id}`);
+      return data;
+    } catch (err) {
+      console.error(`[EMAIL] ❌ Resend send failed:`, err.message);
+      throw err;
+    }
+  }
+
+  // ── Local dev: SMTP (Gmail App Password) ──
+  console.log(`[EMAIL] SMTP → ${process.env.SMTP_HOST}:${process.env.SMTP_PORT} (user: ${process.env.SMTP_USER})`);
+  try {
+    const info = await getTransporter().sendMail({
+      from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
+      to,
       subject,
       text,
       html,
     });
-    if (error) throw new Error(error.message || 'Resend API error');
-    console.log(`[EMAIL] OTP sent via Resend to ${to} | Id: ${data.id}`);
-    return data;
+    console.log(`[EMAIL] ✅ OTP sent via SMTP to ${to} | MessageId: ${info.messageId}`);
+    return info;
+  } catch (err) {
+    console.error(`[EMAIL] ❌ SMTP send failed:`, err.message);
+    if (err.message.includes('ENETUNREACH') || err.message.includes('ETIMEDOUT') || err.message.includes('Connection timeout')) {
+      console.error(`[EMAIL] 🚫 SMTP port is BLOCKED on this server!`);
+      console.error(`[EMAIL] 💡 Fix: Add RESEND_API_KEY to Render Environment variables`);
+      console.error(`[EMAIL]    1. Go to resend.com → Sign up → Get API key`);
+      console.error(`[EMAIL]    2. Render Dashboard → Environment → Add RESEND_API_KEY=re_xxxxx`);
+      console.error(`[EMAIL]    3. Redeploy`);
+      throw new Error('Email failed: SMTP blocked on this server. Configure RESEND_API_KEY for production.');
+    }
+    throw err;
   }
-
-  // ── Local dev: SMTP (Gmail App Password) ──
-  const info = await getTransporter().sendMail({
-    from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
-    to,
-    subject,
-    text,
-    html,
-  });
-  console.log(`[EMAIL] OTP sent via SMTP to ${to} | MessageId: ${info.messageId}`);
-  return info;
 }
 
 module.exports = { sendOtpEmail, verifyConnection };
