@@ -19,6 +19,7 @@ const ALLOWED_ORIGINS = [
   'http://localhost:8083',
   'http://localhost:19006',
   'https://cashbook-mykd.onrender.com',
+  'https://cashbook-ejj2.onrender.com',
 ];
 app.use(cors({
   origin: (origin, cb) => {
