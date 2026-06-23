@@ -1,8 +1,15 @@
 const nodemailer = require('nodemailer');
 
-// ── SMTP Transporter (Gmail App Password via nodemailer) ──
-let transporter = null;
+// ── Resend API (production — uses HTTPS, works on Render) ──
+const useResend = !!process.env.RESEND_API_KEY;
+let resend = null;
+if (useResend) {
+  const { Resend } = require('resend');
+  resend = new Resend(process.env.RESEND_API_KEY);
+}
 
+// ── SMTP Transporter (local dev — Gmail App Password) ──
+let transporter = null;
 function getTransporter() {
   if (transporter) return transporter;
   transporter = nodemailer.createTransport({
@@ -20,13 +27,17 @@ function getTransporter() {
 
 // ── Connection verify on startup ───────────────────────
 async function verifyConnection() {
+  if (useResend) {
+    console.log('✅ Resend email service ready (HTTPS API)');
+    return;
+  }
   if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
-    console.warn('⚠️  No email service configured — SMTP_USER / SMTP_PASS missing');
+    console.warn('⚠️  No email service configured — set RESEND_API_KEY (production) or SMTP_USER/SMTP_PASS (local)');
     return;
   }
   try {
     await getTransporter().verify();
-    console.log('✅ SMTP email service ready');
+    console.log('✅ SMTP email service ready (local dev)');
   } catch (err) {
     console.warn('⚠️  SMTP verify failed (non-fatal):', err.message);
   }
@@ -179,6 +190,22 @@ async function sendOtpEmail({ to, otp }) {
   const text      = buildOtpText({ otp, recipient });
   const html      = buildOtpHtml({ otp, recipient });
 
+  // ── Production: Resend API (HTTPS — works on Render) ──
+  if (useResend) {
+    const fromAddr = process.env.RESEND_FROM || 'onboarding@resend.dev';
+    const { data, error } = await resend.emails.send({
+      from: `CashBook <${fromAddr}>`,
+      to: [to],
+      subject,
+      text,
+      html,
+    });
+    if (error) throw new Error(error.message || 'Resend API error');
+    console.log(`[EMAIL] OTP sent via Resend to ${to} | Id: ${data.id}`);
+    return data;
+  }
+
+  // ── Local dev: SMTP (Gmail App Password) ──
   const info = await getTransporter().sendMail({
     from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to,
@@ -186,7 +213,7 @@ async function sendOtpEmail({ to, otp }) {
     text,
     html,
   });
-  console.log(`[EMAIL] OTP sent to ${to} | MessageId: ${info.messageId}`);
+  console.log(`[EMAIL] OTP sent via SMTP to ${to} | MessageId: ${info.messageId}`);
   return info;
 }
 
