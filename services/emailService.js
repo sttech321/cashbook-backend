@@ -1,22 +1,11 @@
 const nodemailer = require('nodemailer');
 
-// Gmail OAuth2 — production (HTTPS port 443, works on Render)
-function getOAuth2Transporter() {
-  return nodemailer.createTransport({
-    service: 'gmail',
-    auth: {
-      type: 'OAuth2',
-      user: process.env.SMTP_USER,
-      clientId: process.env.GOOGLE_CLIENT_ID,
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-      refreshToken: process.env.GMAIL_REFRESH_TOKEN,
-    },
-  });
-}
+// ── SMTP Transporter (Gmail App Password via nodemailer) ──
+let transporter = null;
 
-// Gmail SMTP — local dev only (port 587, blocked on Render)
-function getSmtpTransporter() {
-  return nodemailer.createTransport({
+function getTransporter() {
+  if (transporter) return transporter;
+  transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
     port: parseInt(process.env.SMTP_PORT, 10) || 587,
     secure: false,
@@ -26,16 +15,20 @@ function getSmtpTransporter() {
     },
     tls: { rejectUnauthorized: false },
   });
+  return transporter;
 }
 
 // ── Connection verify on startup ───────────────────────
 async function verifyConnection() {
-  if (process.env.GMAIL_REFRESH_TOKEN) {
-    console.log('✅ Gmail OAuth2 email service ready');
-  } else if (process.env.SMTP_USER) {
-    console.log('✅ SMTP email service ready (local dev)');
-  } else {
-    console.warn('⚠️  No email service configured');
+  if (!process.env.SMTP_USER || !process.env.SMTP_PASS) {
+    console.warn('⚠️  No email service configured — SMTP_USER / SMTP_PASS missing');
+    return;
+  }
+  try {
+    await getTransporter().verify();
+    console.log('✅ SMTP email service ready');
+  } catch (err) {
+    console.warn('⚠️  SMTP verify failed (non-fatal):', err.message);
   }
 }
 
@@ -186,30 +179,14 @@ async function sendOtpEmail({ to, otp }) {
   const text      = buildOtpText({ otp, recipient });
   const html      = buildOtpHtml({ otp, recipient });
 
-  // Production: Gmail OAuth2 (HTTPS — works on Render)
-  if (process.env.GMAIL_REFRESH_TOKEN) {
-    const transporter = getOAuth2Transporter();
-    const info = await transporter.sendMail({
-      from: `"CashBook" <${process.env.SMTP_USER}>`,
-      to,
-      subject,
-      text,
-      html,
-    });
-    console.log(`[EMAIL] OTP sent via Gmail OAuth2 to ${to} | MessageId: ${info.messageId}`);
-    return info;
-  }
-
-  // Local dev: Gmail SMTP (port 587 — blocked on Render)
-  const transporter = getSmtpTransporter();
-  const info = await transporter.sendMail({
+  const info = await getTransporter().sendMail({
     from: `"CashBook" <${process.env.SMTP_FROM || process.env.SMTP_USER}>`,
     to,
     subject,
     text,
     html,
   });
-  console.log(`[EMAIL] OTP sent via SMTP to ${to} | MessageId: ${info.messageId}`);
+  console.log(`[EMAIL] OTP sent to ${to} | MessageId: ${info.messageId}`);
   return info;
 }
 
