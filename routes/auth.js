@@ -5,7 +5,7 @@ const router = express.Router();
 const store = require('../data/store');
 const authMiddleware = require('../middleware/authMiddleware');
 const { sendOtpEmail } = require('../services/emailService');
-const { sendOtpSms } = require('../services/smsService');
+const { sendOtpSms, verifyOtpSms } = require('../services/smsService');
 const { User } = require('../models');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'cashbook_dev_secret_key_2024';
@@ -43,7 +43,13 @@ const isValidEmail  = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 // POST /api/auth/send-otp
 // ─────────────────────────────────────────────────────────
 router.post('/send-otp', async (req, res) => {
-  const { mobile, email } = req.body;
+  let { mobile, email } = req.body;
+  if (mobile) {
+    mobile = mobile.toString().replace(/\s/g, '');
+    if (mobile.length === 10) mobile = '+91' + mobile;
+    else if (!mobile.startsWith('+')) mobile = '+' + mobile;
+  }
+
   if (!mobile && !email) return res.status(400).json({ error: 'mobile or email required' });
 
   const isMobile = !!mobile;
@@ -54,15 +60,22 @@ router.post('/send-otp', async (req, res) => {
   if (!isMobile && !isValidEmail(key))  return res.status(400).json({ error: 'Invalid email address format' });
   if (!rateLimit(key)) return res.status(429).json({ error: 'Too many OTP requests. Try again in 1 minute.' });
 
-  const otp = generateOtp();
-  store.saveOtp(key, otp);
-  console.log(`[OTP] ${type.toUpperCase()} → ${key} | OTP: ${otp}`);
+  // For email, we always generate and use a local OTP
+  let localOtp = null;
+  if (!isMobile) {
+    localOtp = generateOtp();
+    store.saveOtp(key, localOtp);
+    console.log(`[OTP] EMAIL → ${key} | OTP: ${localOtp}`);
+  }
 
   try {
     if (!isMobile) {
-      await sendOtpEmail({ to: email, otp });
+      await sendOtpEmail({ to: email, otp: localOtp });
     } else {
-      await sendOtpSms({ to: mobile, otp });
+      // For mobile, try using Twilio Verify (no local OTP passed)
+      const hasTwilio = !!process.env.TWILIO_ACCOUNT_SID && !!process.env.TWILIO_VERIFY_SERVICE_SID;
+      if (!hasTwilio) throw new Error('TWILIO_NOT_CONFIGURED');
+      await sendOtpSms({ to: mobile });
     }
     return res.json({
       success: true,
@@ -71,27 +84,34 @@ router.post('/send-otp', async (req, res) => {
     });
   } catch (err) {
     if (err.message === 'TWILIO_NOT_CONFIGURED' || err.message === 'RESEND_NOT_CONFIGURED') {
-      console.log(`[DEV] ${isMobile ? 'SMS' : 'Email'} service not configured. OTP: ${otp}`);
+      // Dev Fallback logic
+      const fallbackOtp = localOtp || generateOtp();
+      if (isMobile) {
+         store.saveOtp(key, fallbackOtp);
+         console.log(`[DEV FALLBACK] SMS service not configured. Generated local OTP for ${key}: ${fallbackOtp}`);
+      }
       return res.json({
         success: true,
         type,
         message: `OTP generated (no ${isMobile ? 'SMS' : 'email'} service — check server logs)`,
-        _demo_otp: otp,
+        _demo_otp: fallbackOtp,
       });
     }
 
     console.error(`[${isMobile ? 'SMS' : 'EMAIL'} ERROR]`, err.message);
     console.error(`[${isMobile ? 'SMS' : 'EMAIL'} ERROR] Stack:`, err.stack);
 
-    // Dev fallback if the service fails (e.g. invalid keys) but is "configured"
+    // Dev fallback if the service fails but is "configured"
     const hasService = isMobile ? !!process.env.TWILIO_ACCOUNT_SID : (!!process.env.RESEND_API_KEY || !!process.env.SMTP_USER);
     if (!hasService || process.env.NODE_ENV !== 'production') {
-       console.log(`[DEV FALLBACK] Service error but returning demo OTP: ${otp}`);
+       const fallbackOtp = localOtp || generateOtp();
+       if (isMobile) store.saveOtp(key, fallbackOtp);
+       console.log(`[DEV FALLBACK] Service error but returning demo OTP: ${fallbackOtp}`);
        return res.json({
          success: true,
          type,
          message: `OTP generated (Service error fallback — check logs)`,
-         _demo_otp: otp,
+         _demo_otp: fallbackOtp,
        });
     }
 
@@ -103,14 +123,47 @@ router.post('/send-otp', async (req, res) => {
 // POST /api/auth/verify-otp
 // ─────────────────────────────────────────────────────────
 router.post('/verify-otp', async (req, res) => {
-  const { mobile, email, otp } = req.body;
+  let { mobile, email, otp } = req.body;
+  if (mobile) {
+    mobile = mobile.toString().replace(/\s/g, '');
+    if (mobile.length === 10) mobile = '+91' + mobile;
+    else if (!mobile.startsWith('+')) mobile = '+' + mobile;
+  }
+
   const key  = mobile || email;
   const type = mobile ? 'mobile' : 'email';
+  const code = otp.toString().trim();
 
   if (!key || !otp) return res.status(400).json({ error: 'mobile/email and otp are required' });
 
-  const result = store.verifyOtp(key, otp.toString().trim());
-  if (!result.valid) return res.status(400).json({ error: result.reason });
+  // Verification Logic
+  let isValid = false;
+  let reason = 'Invalid OTP';
+
+  if (!mobile) {
+    // Email uses local store
+    const result = store.verifyOtp(key, code);
+    isValid = result.valid;
+    reason = result.reason;
+  } else {
+    // Mobile uses Twilio Verify API OR Dev Fallback
+    const localCheck = store.verifyOtp(key, code);
+    if (localCheck.valid) {
+       isValid = true; // Handled by Dev Fallback
+    } else {
+       try {
+         isValid = await verifyOtpSms({ to: mobile, code });
+       } catch (err) {
+         if (err.message === 'TWILIO_NOT_CONFIGURED') {
+            reason = localCheck.reason; // Local check failed and Twilio isn't configured
+         } else {
+            return res.status(400).json({ error: 'Verification service error' });
+         }
+       }
+    }
+  }
+
+  if (!isValid) return res.status(400).json({ error: reason });
 
   try {
     const user = await store.findOrCreateUser(key, type);
