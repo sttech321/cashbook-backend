@@ -13,6 +13,7 @@ class Transaction extends Model {
     remarks:      'TEXT',
     category:     'TEXT',
     payment_mode: 'TEXT',
+    attachments:  'TEXT',   // JSON array of uploaded bill URLs
     created_by:   'TEXT REFERENCES users(id) ON DELETE SET NULL',
     created_at:   'TEXT DEFAULT (CURRENT_TIMESTAMP)',
   };
@@ -22,6 +23,13 @@ class Transaction extends Model {
       'CREATE INDEX IF NOT EXISTS idx_txn_book ON transactions(book_id)',
       'CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(date)',
     ];
+  }
+
+  // Add newer columns to pre-existing tables (live DB was created before `attachments`).
+  static async sync() {
+    await super.sync();
+    try { await Transaction.query('ALTER TABLE transactions ADD COLUMN attachments TEXT', []); }
+    catch { /* column already exists — safe to ignore */ }
   }
 
   static async findByBook(bookId) {

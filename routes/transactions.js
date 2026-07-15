@@ -2,9 +2,28 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const db = require('../db');
 const auth = require('../middleware/authMiddleware');
+const multer = require('multer');
+const path = require('path');
 
 function makeId() {
   return 'txn_' + Date.now() + Math.random().toString(36).slice(2, 6);
+}
+
+// Bill attachments — stored on disk under /uploads (served statically by server.js)
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => {
+    cb(null, `bill-${req.params.bookId}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}${path.extname(file.originalname)}`);
+  },
+});
+const upload = multer({ storage });
+
+// Normalise incoming attachments (array or JSON string) → JSON string for storage
+function toAttachmentsJson(attachments) {
+  if (attachments == null) return null;
+  if (typeof attachments === 'string') return attachments || null;
+  if (Array.isArray(attachments)) return attachments.length ? JSON.stringify(attachments) : null;
+  return null;
 }
 
 async function ownsBook(userId, businessId, bookId) {
@@ -72,10 +91,22 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+// POST /api/businesses/:businessId/cashbooks/:bookId/transactions/upload
+// Upload bill attachments (up to 4 images/PDFs) → returns { urls: [...] }
+router.post('/upload', auth, upload.array('attachments', 4), async (req, res) => {
+  const { businessId, bookId } = req.params;
+  if (!await canWriteBook(req.user.userId, businessId, bookId))
+    return res.status(403).json({ error: 'Access denied' });
+  if (!req.files || req.files.length === 0)
+    return res.status(400).json({ error: 'No files uploaded' });
+  const urls = req.files.map((f) => `/uploads/${f.filename}`);
+  res.json({ urls });
+});
+
 // POST /api/businesses/:businessId/cashbooks/:bookId/transactions
 router.post('/', auth, async (req, res) => {
   const { businessId, bookId } = req.params;
-  const { type, amount, date, party, remarks, category, payment_mode } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments } = req.body;
   const userId = req.user.userId;
 
   if (!type || !amount || !date)
@@ -88,9 +119,9 @@ router.post('/', auth, async (req, res) => {
   const id = makeId();
   try {
     const { rows } = await db.query(
-      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, userId]
+      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, attachments, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), userId]
     );
     // Return with creator name for immediate display
     const txn = rows[0];
@@ -110,15 +141,15 @@ router.patch('/:txnId', auth, async (req, res) => {
   if (!await canWriteBook(userId, businessId, bookId))
     return res.status(403).json({ error: 'Access denied' });
 
-  const { type, amount, date, party, remarks, category, payment_mode } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments } = req.body;
   if (!type || !amount || !date)
     return res.status(400).json({ error: 'type, amount, date required' });
 
   try {
     const { rows } = await db.query(
-      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7
-       WHERE id=$8 AND book_id=$9 RETURNING *`,
-      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, txnId, bookId]
+      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7, attachments=$8
+       WHERE id=$9 AND book_id=$10 RETURNING *`,
+      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), txnId, bookId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Transaction not found' });
     res.json({ transaction: rows[0] });
