@@ -14,6 +14,7 @@ class Transaction extends Model {
     category:     'TEXT',
     payment_mode: 'TEXT',
     created_by:   'TEXT REFERENCES users(id) ON DELETE SET NULL',
+    attachments:  'TEXT', // JSON array of urls
     created_at:   'TEXT DEFAULT (CURRENT_TIMESTAMP)',
   };
 
@@ -22,6 +23,16 @@ class Transaction extends Model {
       'CREATE INDEX IF NOT EXISTS idx_txn_book ON transactions(book_id)',
       'CREATE INDEX IF NOT EXISTS idx_txn_date ON transactions(date)',
     ];
+  }
+
+  static async sync() {
+    await super.sync();
+    // Add attachments column if it doesn't exist
+    try {
+      await Transaction.query('ALTER TABLE transactions ADD COLUMN attachments TEXT', []);
+    } catch {
+      // already exists
+    }
   }
 
   static async findByBook(bookId) {

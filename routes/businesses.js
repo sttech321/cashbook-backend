@@ -22,7 +22,7 @@ router.get('/', auth, async (req, res) => {
   try {
     const userId = req.user.userId;
     const { rows: owned } = await db.query(
-      "SELECT *, 'Primary Admin' AS my_role FROM businesses WHERE user_id = $1 ORDER BY created_at ASC",
+      "SELECT *, 'Primary Admin' AS my_role, 'Accepted' AS my_invite_status FROM businesses WHERE user_id = $1 ORDER BY created_at ASC",
       [userId]
     );
     // Businesses where user is a business_member (not revoked) OR a book_member in any book
@@ -32,7 +32,13 @@ router.get('/', auth, async (req, res) => {
           WHERE bm.business_id = b.id AND bm.user_id = $1 AND bm.invite_status != 'Revoked'
           LIMIT 1),
          'Employee'
-       ) AS my_role
+       ) AS my_role,
+       COALESCE(
+         (SELECT bm.invite_status FROM business_members bm
+          WHERE bm.business_id = b.id AND bm.user_id = $1 AND bm.invite_status != 'Revoked'
+          LIMIT 1),
+         'Accepted'
+       ) AS my_invite_status
        FROM businesses b
        WHERE b.user_id != $1
          AND (
@@ -123,8 +129,34 @@ router.delete('/:id', auth, async (req, res) => {
     await db.query('DELETE FROM businesses WHERE id = $1 AND user_id = $2', [req.params.id, req.user.userId]);
     res.json({ success: true });
   } catch (err) {
+    require('fs').writeFileSync('delete_error.txt', err.stack || err.message);
     console.error('[businesses DELETE]', err.message);
     res.status(500).json({ error: 'Failed to delete business' });
+  }
+});
+
+// POST /api/businesses/:id/accept-invite
+router.post('/:id/accept-invite', auth, async (req, res) => {
+  try {
+    const businessId = req.params.id;
+    const userId = req.user.userId;
+
+    const { rows } = await db.query(
+      `UPDATE business_members 
+       SET invite_status = 'Accepted' 
+       WHERE business_id = $1 AND user_id = $2 AND invite_status = 'Pending'
+       RETURNING *`,
+      [businessId, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'No pending invitation found for this business' });
+    }
+
+    res.json({ success: true, member: rows[0] });
+  } catch (err) {
+    console.error('[accept invite]', err.message);
+    res.status(500).json({ error: 'Failed to accept invitation' });
   }
 });
 

@@ -201,7 +201,7 @@ router.get('/me', authMiddleware, async (req, res) => {
 // PATCH /api/auth/me — update name / email
 // ─────────────────────────────────────────────────────────
 router.patch('/me', authMiddleware, async (req, res) => {
-  const { name, email, mobile } = req.body;
+  const { name, email, mobile, otpMobile, otpEmail } = req.body;
   const userId = req.user.userId;
 
   try {
@@ -228,6 +228,34 @@ router.patch('/me', authMiddleware, async (req, res) => {
         if (existing && existing.id !== userId) {
           return res.status(409).json({ error: 'This email is already linked to another account.' });
         }
+      }
+    }
+
+    // Verify Mobile OTP if changed
+    if (mobile !== undefined && mobile !== null && mobile !== '') {
+      const mobileStr = String(mobile).trim();
+      if (mobileStr !== (currentUser.mobile || '')) {
+        if (!otpMobile) return res.status(400).json({ error: 'OTP is required to change mobile number.' });
+        const localCheck = store.verifyOtp(mobileStr, otpMobile.toString().trim());
+        if (!localCheck.valid) {
+           try {
+             const validSms = await verifyOtpSms({ to: mobileStr, code: otpMobile.toString().trim() });
+             if (!validSms) return res.status(400).json({ error: 'Invalid OTP for mobile.' });
+           } catch(err) {
+             if (err.message === 'TWILIO_NOT_CONFIGURED') return res.status(400).json({ error: localCheck.reason });
+             return res.status(400).json({ error: 'Verification service error' });
+           }
+        }
+      }
+    }
+
+    // Verify Email OTP if changed
+    if (email !== undefined && email !== null && email !== '') {
+      const emailStr = String(email).trim().toLowerCase();
+      if (emailStr !== (currentUser.email || '').toLowerCase()) {
+        if (!otpEmail) return res.status(400).json({ error: 'OTP is required to change email.' });
+        const result = store.verifyOtp(emailStr, otpEmail.toString().trim());
+        if (!result.valid) return res.status(400).json({ error: `Email OTP error: ${result.reason}` });
       }
     }
 

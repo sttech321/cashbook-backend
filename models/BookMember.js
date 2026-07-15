@@ -11,6 +11,8 @@ class BookMember extends Model {
     mobile:     'TEXT',
     email:      'TEXT',
     role:       "TEXT NOT NULL DEFAULT 'Data Operator'",
+    invite_status: "TEXT NOT NULL DEFAULT 'Pending'",
+    invited_by:    'TEXT REFERENCES users(id) ON DELETE SET NULL',
     created_at: 'TEXT DEFAULT (CURRENT_TIMESTAMP)',
   };
 
@@ -23,15 +25,19 @@ class BookMember extends Model {
 
   static async sync() {
     await super.sync();
-    // Add email column if it doesn't exist (migration for existing databases)
-    try {
-      const { rows } = await BookMember.query('PRAGMA table_info(book_members)', []);
-      const hasEmail = rows.some(r => r.name === 'email');
-      if (!hasEmail) {
-        await BookMember.query('ALTER TABLE book_members ADD COLUMN email TEXT', []);
+    
+    // Add columns if they don't exist (migration for existing databases)
+    const migrations = [
+      `ALTER TABLE book_members ADD COLUMN email TEXT`,
+      `ALTER TABLE book_members ADD COLUMN invite_status TEXT NOT NULL DEFAULT 'Pending'`,
+      `ALTER TABLE book_members ADD COLUMN invited_by TEXT REFERENCES users(id) ON DELETE SET NULL`
+    ];
+    for (const sql of migrations) {
+      try {
+        await BookMember.query(sql, []);
+      } catch (err) {
+        // column already exists — safe to ignore
       }
-    } catch {
-      // PostgreSQL — column already exists or PRAGMA not supported; ignore
     }
   }
 

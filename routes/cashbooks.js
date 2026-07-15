@@ -54,10 +54,13 @@ router.get('/', auth, async (req, res) => {
       const result = await db.query(
         `SELECT c.*,
            (SELECT COUNT(*) FROM transactions t WHERE t.book_id = c.id) AS transaction_count,
-           (SELECT COUNT(*) FROM book_members bm2 WHERE bm2.book_id = c.id) + 1 AS member_count
+           (SELECT COUNT(*) FROM book_members bm2 WHERE bm2.book_id = c.id) + 1 AS member_count,
+           bm.invite_status AS my_invite_status,
+           u.name AS invited_by_name
          FROM cashbooks c
          JOIN book_members bm ON bm.book_id = c.id AND bm.user_id = $1
-         WHERE c.business_id = $2
+         LEFT JOIN users u ON u.id = bm.invited_by
+         WHERE c.business_id = $2 AND bm.invite_status != 'Revoked'
          ORDER BY c.created_at ASC`,
         [userId, businessId]
       );
@@ -124,6 +127,31 @@ router.delete('/:bookId', auth, async (req, res) => {
   } catch (err) {
     console.error('[cashbooks DELETE]', err.message);
     res.status(500).json({ error: 'Failed to delete cashbook' });
+  }
+});
+
+// POST /api/businesses/:businessId/cashbooks/:bookId/accept-invite
+router.post('/:bookId/accept-invite', auth, async (req, res) => {
+  const { businessId, bookId } = req.params;
+  const userId = req.user.userId;
+
+  try {
+    const { rows } = await db.query(
+      `UPDATE book_members 
+       SET invite_status = 'Accepted' 
+       WHERE book_id = $1 AND user_id = $2 AND invite_status = 'Pending'
+       RETURNING *`,
+      [bookId, userId]
+    );
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'Invite not found or already accepted' });
+    }
+
+    res.json({ success: true, member: rows[0] });
+  } catch (err) {
+    console.error('[cashbooks accept invite POST]', err.message);
+    res.status(500).json({ error: 'Failed to accept invite' });
   }
 });
 

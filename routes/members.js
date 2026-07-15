@@ -13,8 +13,8 @@ async function ownsBook(userId, businessId, bookId) {
   const { rows } = await db.query(
     `SELECT c.id FROM cashbooks c
      JOIN businesses b ON b.id = c.business_id
-     WHERE c.id = $1 AND c.business_id = $2 AND b.user_id = $3`,
-    [bookId, businessId, userId]
+     WHERE c.id = $1 AND b.user_id = $2`,
+    [bookId, userId]
   );
   return rows.length > 0;
 }
@@ -43,7 +43,10 @@ router.get('/', auth, async (req, res) => {
     return res.status(403).json({ error: 'Access denied' });
 
   try {
-    const { rows: bizRows } = await db.query('SELECT user_id FROM businesses WHERE id = $1', [businessId]);
+    const { rows: bizRows } = await db.query(
+      'SELECT b.user_id FROM cashbooks c JOIN businesses b ON c.business_id = b.id WHERE c.id = $1',
+      [bookId]
+    );
     const ownerId = bizRows[0]?.user_id;
     const ownerUser = ownerId ? await User.findById(ownerId) : null;
 
@@ -72,7 +75,8 @@ router.get('/', auth, async (req, res) => {
       [bookId]
     );
 
-    res.json({ members: [primaryAdmin, ...rows] });
+    const filteredRows = rows.filter(r => r.user_id !== ownerId);
+    res.json({ members: [primaryAdmin, ...filteredRows] });
   } catch (err) {
     console.error('[members GET]', err.message);
     res.status(500).json({ error: 'Failed to fetch members' });
@@ -96,12 +100,25 @@ router.post('/', auth, async (req, res) => {
   if (bizRows[0]?.user_id === user_id)
     return res.status(400).json({ error: 'Book owner is already the Primary Admin' });
 
+  let finalUserId = user_id || null;
+  const { User } = require('../models');
+  if (!finalUserId) {
+    if (email) {
+      const u = await User.findByEmail(email);
+      if (u) finalUserId = u.id;
+    }
+    if (!finalUserId && mobile) {
+      const u = await User.findByMobile(mobile);
+      if (u) finalUserId = u.id;
+    }
+  }
+
   const id = makeId();
   try {
     const { rows } = await db.query(
       `INSERT INTO book_members (id, book_id, user_id, name, mobile, email, role)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, bookId, user_id || null, name, mobile || null, email || null, role]
+      [id, bookId, finalUserId, name, mobile || null, email || null, role]
     );
     res.status(201).json({ member: rows[0] });
   } catch (err) {

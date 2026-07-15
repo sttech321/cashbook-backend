@@ -75,7 +75,21 @@ router.post('/', auth, requireAccess, async (req, res) => {
 
   const bizId = req.params.businessId;
 
-  // Dedup: return existing member if same identifier already in this business
+  // Dedup: return 400 if same identifier already in this business
+  // 1. Check if the invited person is the owner
+  const biz = req.business;
+  const owner = await User.findById(biz.user_id);
+  if (owner) {
+    if (
+      (user_id && owner.id === user_id) ||
+      (mobile && owner.mobile === mobile) ||
+      (email && owner.email && owner.email.toLowerCase() === email.toLowerCase().trim())
+    ) {
+      return res.status(400).json({ error: 'User is already the owner of this business.' });
+    }
+  }
+
+  // 2. Check if the person is already a business member
   let existing = null;
   if (user_id) {
     existing = await BusinessMember.findOne({ business_id: bizId, user_id });
@@ -86,7 +100,10 @@ router.post('/', auth, requireAccess, async (req, res) => {
   if (!existing && email) {
     existing = await BusinessMember.findOne({ business_id: bizId, email: email.toLowerCase().trim() });
   }
-  if (existing) return res.json({ member: existing });
+  if (existing) {
+    const statusText = existing.invite_status === 'Pending' ? 'already invited' : 'already a member';
+    return res.status(400).json({ error: `User is ${statusText} in this business.` });
+  }
 
   const member = await BusinessMember.create({
     business_id:   bizId,
@@ -197,6 +214,8 @@ router.post('/:memberId/books', auth, requireAccess, async (req, res) => {
     mobile:  memberMobile || null,
     email:   memberEmail || null,
     role:    role || 'Data Operator',
+    invite_status: 'Pending',
+    invited_by:    req.user.userId,
   });
 
   res.status(201).json({ bookId, bookName: book.name, role: role || 'Data Operator' });

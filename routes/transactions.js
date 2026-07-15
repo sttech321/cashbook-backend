@@ -2,6 +2,17 @@ const express = require('express');
 const router = express.Router({ mergeParams: true });
 const db = require('../db');
 const auth = require('../middleware/authMiddleware');
+const multer = require('multer');
+
+// Reusing same local storage as businesses logo upload
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, 'uploads/'),
+  filename: (req, file, cb) => {
+    const ext = file.originalname.split('.').pop();
+    cb(null, `${file.fieldname}-${Date.now()}.${ext}`);
+  },
+});
+const upload = multer({ storage });
 
 function makeId() {
   return 'txn_' + Date.now() + Math.random().toString(36).slice(2, 6);
@@ -11,8 +22,8 @@ async function ownsBook(userId, businessId, bookId) {
   const { rows } = await db.query(
     `SELECT c.id FROM cashbooks c
      JOIN businesses b ON b.id = c.business_id
-     WHERE c.id = $1 AND c.business_id = $2 AND b.user_id = $3`,
-    [bookId, businessId, userId]
+     WHERE c.id = $1 AND b.user_id = $2`,
+    [bookId, userId]
   );
   return rows.length > 0;
 }
@@ -21,10 +32,9 @@ async function ownsBook(userId, businessId, bookId) {
 async function getBookMemberRole(userId, businessId, bookId) {
   const { rows } = await db.query(
     `SELECT bm.role FROM book_members bm
-     JOIN cashbooks c ON c.id = bm.book_id
-     WHERE bm.book_id = $1 AND bm.user_id = $2 AND c.business_id = $3
+     WHERE bm.book_id = $1 AND bm.user_id = $2
      LIMIT 1`,
-    [bookId, userId, businessId]
+    [bookId, userId]
   );
   return rows[0]?.role || null;
 }
@@ -72,10 +82,28 @@ router.get('/', auth, async (req, res) => {
   }
 });
 
+
+
+// POST /api/businesses/:businessId/cashbooks/:bookId/transactions/upload
+router.post('/upload', auth, upload.array('attachments', 4), async (req, res) => {
+  const { businessId, bookId } = req.params;
+  const userId = req.user.userId;
+
+  if (!await canWriteBook(userId, businessId, bookId))
+    return res.status(403).json({ error: 'Access denied' });
+
+  if (!req.files || req.files.length === 0) {
+    return res.status(400).json({ error: 'No files uploaded' });
+  }
+
+  const urls = req.files.map(file => `/uploads/${file.filename}`);
+  res.json({ urls });
+});
+
 // POST /api/businesses/:businessId/cashbooks/:bookId/transactions
 router.post('/', auth, async (req, res) => {
   const { businessId, bookId } = req.params;
-  const { type, amount, date, party, remarks, category, payment_mode } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments } = req.body;
   const userId = req.user.userId;
 
   if (!type || !amount || !date)
@@ -87,10 +115,11 @@ router.post('/', auth, async (req, res) => {
 
   const id = makeId();
   try {
+    const attachJson = attachments ? (Array.isArray(attachments) ? JSON.stringify(attachments) : attachments) : null;
     const { rows } = await db.query(
-      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
-      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, userId]
+      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, created_by, attachments)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
+      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, userId, attachJson]
     );
     // Return with creator name for immediate display
     const txn = rows[0];
@@ -110,15 +139,16 @@ router.patch('/:txnId', auth, async (req, res) => {
   if (!await canWriteBook(userId, businessId, bookId))
     return res.status(403).json({ error: 'Access denied' });
 
-  const { type, amount, date, party, remarks, category, payment_mode } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments } = req.body;
   if (!type || !amount || !date)
     return res.status(400).json({ error: 'type, amount, date required' });
 
   try {
+    const attachJson = attachments ? (Array.isArray(attachments) ? JSON.stringify(attachments) : attachments) : null;
     const { rows } = await db.query(
-      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7
-       WHERE id=$8 AND book_id=$9 RETURNING *`,
-      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, txnId, bookId]
+      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7, attachments=$8
+       WHERE id=$9 AND book_id=$10 RETURNING *`,
+      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, attachJson, txnId, bookId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Transaction not found' });
     res.json({ transaction: rows[0] });

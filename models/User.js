@@ -35,13 +35,22 @@ class User extends Model {
 
   static async findOrCreate(key, type) {
     const col = type === 'mobile' ? 'mobile' : 'email';
-    const existing = await User.findOne({ [col]: key });
-    if (existing) return existing;
-    return User.create({
-      name:   '',
-      email:  type === 'email'  ? key : null,
-      mobile: type === 'mobile' ? key : null,
-    });
+    let user = await User.findOne({ [col]: key });
+    
+    if (!user) {
+      user = await User.create({
+        name:   '',
+        email:  type === 'email'  ? key : null,
+        mobile: type === 'mobile' ? key : null,
+      });
+    }
+
+    // Backfill user_id in related tables for invites that were created before registration
+    const db = require('../db');
+    await db.query(`UPDATE book_members SET user_id = $1 WHERE ${col} = $2 AND user_id IS NULL`, [user.id, key]);
+    await db.query(`UPDATE business_members SET user_id = $1 WHERE ${col} = $2 AND user_id IS NULL`, [user.id, key]);
+
+    return user;
   }
 
   // ── Profile update ────────────────────────────────────────

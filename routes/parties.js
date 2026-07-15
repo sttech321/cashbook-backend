@@ -11,8 +11,8 @@ async function ownsBook(userId, businessId, bookId) {
   const { rows } = await db.query(
     `SELECT c.id FROM cashbooks c
      JOIN businesses b ON b.id = c.business_id
-     WHERE c.id = $1 AND c.business_id = $2 AND b.user_id = $3`,
-    [bookId, businessId, userId]
+     WHERE c.id = $1 AND b.user_id = $2`,
+    [bookId, userId]
   );
   return rows.length > 0;
 }
