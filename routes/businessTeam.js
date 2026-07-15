@@ -57,7 +57,7 @@ router.get('/', auth, requireAccess, async (req, res) => {
     name:          owner?.name || 'Owner',
     mobile:        owner?.mobile || null,
     email:         owner?.email || null,
-    employee_id:   null,
+    employee_id:   owner?.employee_id || null,
     role:          'Primary Admin',
     invite_status: 'Accepted',
     reports_to:    null,
@@ -104,6 +104,29 @@ router.post('/', auth, requireAccess, async (req, res) => {
 // PATCH /:id — update role / employee_id / reports_to
 router.patch('/:id', auth, requireAccess, async (req, res) => {
   const { role, employee_id, reports_to } = req.body;
+
+  // Owner (Primary Admin) is not a business_members row — their Employee ID lives
+  // on the user record. Role/reports_to are not editable for the owner.
+  if (req.params.id.startsWith('owner_')) {
+    if (employee_id !== undefined) {
+      await User.update(req.business.user_id, { employee_id: employee_id || null });
+    }
+    const owner = await User.findById(req.business.user_id);
+    return res.json({ member: {
+      id:            `owner_${req.business.user_id}`,
+      business_id:   req.business.id,
+      user_id:       req.business.user_id,
+      name:          owner?.name || 'Owner',
+      mobile:        owner?.mobile || null,
+      email:         owner?.email || null,
+      employee_id:   owner?.employee_id || null,
+      role:          'Primary Admin',
+      invite_status: 'Accepted',
+      reports_to:    null,
+      is_owner:      true,
+    } });
+  }
+
   const updates = {};
   if (role        !== undefined) updates.role        = role;
   if (employee_id !== undefined) updates.employee_id = employee_id;
