@@ -11,6 +11,11 @@ const app  = express();
 const PORT = process.env.PORT || 3001;
 
 // ── Middleware ────────────────────────────────────────────────
+// Extra origins can be added via env (comma-separated) without a code change:
+//   CORS_ORIGINS=https://foo.com,https://bar.com
+const ENV_ORIGINS = (process.env.CORS_ORIGINS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
+
 const ALLOWED_ORIGINS = [
   'http://localhost:5173',
   'http://localhost:4173',
@@ -20,11 +25,21 @@ const ALLOWED_ORIGINS = [
   'http://localhost:19006',
   'https://cashbook-mykd.onrender.com',
   'https://cashbook-ejj2.onrender.com',
+  'https://cashbook-app-83p6.onrender.com', // deployed web app
+  ...ENV_ORIGINS,
 ];
+
+function isAllowedOrigin(origin) {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  // Allow any Render-hosted frontend (*.onrender.com) so new deploys don't break CORS.
+  if (/^https:\/\/[a-z0-9-]+\.onrender\.com$/i.test(origin)) return true;
+  return false;
+}
+
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin) return cb(null, true);                    // non-browser (curl, Postman, etc.)
-    if (ALLOWED_ORIGINS.includes(origin)) return cb(null, origin); // reflect exact origin — required when credentials:'include'
+    if (!origin) return cb(null, true);                 // non-browser (curl, Postman, etc.)
+    if (isAllowedOrigin(origin)) return cb(null, origin); // reflect exact origin — required when credentials:'include'
     cb(new Error(`CORS: ${origin} not allowed`));
   },
   credentials: true,
