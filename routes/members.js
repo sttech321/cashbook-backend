@@ -115,9 +115,48 @@ router.post('/', auth, async (req, res) => {
 
   const id = makeId();
   try {
+    // Add to business_members if not already present
+    if (finalUserId) {
+      const { rows: bizRows } = await db.query(
+        'SELECT id FROM business_members WHERE business_id = $1 AND user_id = $2',
+        [businessId, finalUserId]
+      );
+      if (bizRows.length === 0) {
+        await require('../models').BusinessMember.create({
+          business_id: businessId,
+          user_id: finalUserId,
+          name,
+          mobile: mobile || null,
+          email: email || null,
+          role: 'Employee',
+          invite_status: 'Accepted',
+          invited_by: userId
+        });
+      }
+    } else if (email || mobile) {
+       const q = email ? 'email = $2' : 'mobile = $2';
+       const p = email ? email : mobile;
+       const { rows: bizRows } = await db.query(
+         `SELECT id FROM business_members WHERE business_id = $1 AND ${q}`,
+         [businessId, p]
+       );
+       if (bizRows.length === 0) {
+         await require('../models').BusinessMember.create({
+           business_id: businessId,
+           user_id: null,
+           name,
+           mobile: mobile || null,
+           email: email || null,
+           role: 'Employee',
+           invite_status: 'Accepted',
+           invited_by: userId
+         });
+       }
+    }
+
     const { rows } = await db.query(
-      `INSERT INTO book_members (id, book_id, user_id, name, mobile, email, role)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+      `INSERT INTO book_members (id, book_id, user_id, name, mobile, email, role, invite_status)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,'Accepted') RETURNING *`,
       [id, bookId, finalUserId, name, mobile || null, email || null, role]
     );
     res.status(201).json({ member: rows[0] });

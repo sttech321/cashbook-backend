@@ -70,7 +70,7 @@ router.get('/', auth, requireAccess, async (req, res) => {
 
 // POST / — add member (idempotent: returns existing if same mobile/email/user_id found)
 router.post('/', auth, requireAccess, async (req, res) => {
-  const { name, mobile, email, role, user_id } = req.body;
+  const { name, mobile, email, role, user_id, employee_id } = req.body;
   if (!name?.trim() && !mobile && !email) return res.status(400).json({ error: 'name or email required' });
 
   const bizId = req.params.businessId;
@@ -112,7 +112,8 @@ router.post('/', auth, requireAccess, async (req, res) => {
     mobile:        mobile || null,
     email:         email  ? email.toLowerCase().trim() : null,
     role:          role   || 'Employee',
-    invite_status: 'Pending',
+    employee_id:   employee_id || null,
+    invite_status: 'Accepted',
     invited_by:    req.user.userId,
   });
   res.status(201).json({ member });
@@ -214,7 +215,7 @@ router.post('/:memberId/books', auth, requireAccess, async (req, res) => {
     mobile:  memberMobile || null,
     email:   memberEmail || null,
     role:    role || 'Data Operator',
-    invite_status: 'Pending',
+    invite_status: 'Accepted',
     invited_by:    req.user.userId,
   });
 
