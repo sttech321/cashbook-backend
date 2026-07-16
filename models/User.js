@@ -4,14 +4,15 @@ class User extends Model {
   static tableName = 'users';
 
   static columns = {
-    id:         'TEXT PRIMARY KEY',
-    name:       "TEXT NOT NULL DEFAULT ''",
-    email:      'TEXT UNIQUE',
-    mobile:     'TEXT UNIQUE',
-    avatar:     'TEXT',
-    is_active:  'INTEGER NOT NULL DEFAULT 1',
-    created_at: 'TEXT DEFAULT (CURRENT_TIMESTAMP)',
-    updated_at: 'TEXT DEFAULT (CURRENT_TIMESTAMP)',
+    id:          'TEXT PRIMARY KEY',
+    name:        "TEXT NOT NULL DEFAULT ''",
+    email:       'TEXT UNIQUE',
+    mobile:      'TEXT UNIQUE',
+    avatar:      'TEXT',
+    employee_id: 'TEXT',
+    is_active:   'INTEGER NOT NULL DEFAULT 1',
+    created_at:  'TEXT DEFAULT (CURRENT_TIMESTAMP)',
+    updated_at:  'TEXT DEFAULT (CURRENT_TIMESTAMP)',
   };
 
   static get indexes() {
@@ -19,6 +20,13 @@ class User extends Model {
       'CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email)',
       'CREATE INDEX IF NOT EXISTS idx_users_mobile ON users(mobile)',
     ];
+  }
+
+  // Add newer columns to pre-existing tables (live DB predates `employee_id`).
+  static async sync() {
+    await super.sync();
+    try { await User.query('ALTER TABLE users ADD COLUMN employee_id TEXT', []); }
+    catch { /* column already exists — safe to ignore */ }
   }
 
   // ── Finders ───────────────────────────────────────────────

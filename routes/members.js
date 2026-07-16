@@ -3,7 +3,7 @@ const router = express.Router({ mergeParams: true });
 const db = require('../db');
 const auth = require('../middleware/authMiddleware');
 const store = require('../data/store');
-const { User } = require('../models');
+const { User, BusinessMember } = require('../models');
 
 function makeId() {
   return 'mbr_' + Date.now() + Math.random().toString(36).slice(2, 6);
@@ -159,6 +159,36 @@ router.post('/', auth, async (req, res) => {
        VALUES ($1,$2,$3,$4,$5,$6,$7,'Accepted') RETURNING *`,
       [id, bookId, finalUserId, name, mobile || null, email || null, role]
     );
+
+    // Also add them to the business team (Pending) so they appear on the Team page's
+    // "Pending Invitations". Non-fatal: never block the book-member add on this.
+    try {
+      const ownerId = bizRows[0]?.user_id;
+      const normEmail = email ? email.toLowerCase().trim() : null;
+      if (user_id !== ownerId) { // owner is already the Primary Admin
+        let existingBiz = null;
+        if (user_id)               existingBiz = await BusinessMember.findOne({ business_id: businessId, user_id });
+        if (!existingBiz && normEmail) existingBiz = await BusinessMember.findOne({ business_id: businessId, email: normEmail });
+        if (!existingBiz && mobile)    existingBiz = await BusinessMember.findOne({ business_id: businessId, mobile });
+        if (!existingBiz) {
+          await BusinessMember.create({
+            business_id:   businessId,
+            user_id:       user_id || null,
+            name,
+            mobile:        mobile || null,
+            email:         normEmail,
+            role:          'Employee',
+            // Registered users (found in DB) join directly as active members;
+            // unregistered users stay Pending until they accept the emailed invite.
+            invite_status: user_id ? 'Accepted' : 'Pending',
+            invited_by:    userId,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[members POST] business-team sync skipped:', e.message);
+    }
+
     res.status(201).json({ member: rows[0] });
   } catch (err) {
     if (err.message?.includes('UNIQUE')) return res.status(409).json({ error: 'Member already in this book' });

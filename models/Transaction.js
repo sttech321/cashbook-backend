@@ -4,18 +4,19 @@ class Transaction extends Model {
   static tableName = 'transactions';
 
   static columns = {
-    id:           'TEXT PRIMARY KEY',
-    book_id:      'TEXT NOT NULL REFERENCES cashbooks(id) ON DELETE CASCADE',
-    type:         "TEXT NOT NULL CHECK (type IN ('IN','OUT'))",
-    amount:       'REAL NOT NULL',
-    date:         'TEXT NOT NULL',
-    party:        'TEXT',
-    remarks:      'TEXT',
-    category:     'TEXT',
+    id: 'TEXT PRIMARY KEY',
+    book_id: 'TEXT NOT NULL REFERENCES cashbooks(id) ON DELETE CASCADE',
+    type: "TEXT NOT NULL CHECK (type IN ('IN','OUT'))",
+    amount: 'REAL NOT NULL',
+    date: 'TEXT NOT NULL',
+    party: 'TEXT',
+    remarks: 'TEXT',
+    category: 'TEXT',
     payment_mode: 'TEXT',
-    created_by:   'TEXT REFERENCES users(id) ON DELETE SET NULL',
-    attachments:  'TEXT', // JSON array of urls
-    created_at:   'TEXT DEFAULT (CURRENT_TIMESTAMP)',
+    attachments: 'TEXT',   // JSON array of uploaded bill URLs
+    created_by: 'TEXT REFERENCES users(id) ON DELETE SET NULL',
+    attachments: 'TEXT', // JSON array of urls
+    created_at: 'TEXT DEFAULT (CURRENT_TIMESTAMP)',
   };
 
   static get indexes() {
@@ -25,14 +26,11 @@ class Transaction extends Model {
     ];
   }
 
+  // Add newer columns to pre-existing tables (live DB was created before `attachments`).
   static async sync() {
     await super.sync();
-    // Add attachments column if it doesn't exist
-    try {
-      await Transaction.query('ALTER TABLE transactions ADD COLUMN attachments TEXT', []);
-    } catch {
-      // already exists
-    }
+    try { await Transaction.query('ALTER TABLE transactions ADD COLUMN attachments TEXT', []); }
+    catch { /* column already exists — safe to ignore */ }
   }
 
   static async findByBook(bookId) {
@@ -48,7 +46,7 @@ class Transaction extends Model {
        FROM transactions WHERE book_id = $1`,
       [bookId]
     );
-    const totalIn  = parseFloat(rows[0]?.total_in  || 0);
+    const totalIn = parseFloat(rows[0]?.total_in || 0);
     const totalOut = parseFloat(rows[0]?.total_out || 0);
     return { totalIn, totalOut, balance: totalIn - totalOut };
   }
