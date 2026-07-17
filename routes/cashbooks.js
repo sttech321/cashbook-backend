@@ -206,4 +206,86 @@ router.post('/:bookId/payment-modes', auth, async (req, res) => {
   }
 });
 
+// PATCH /api/businesses/:businessId/cashbooks/:bookId/categories/:id
+router.patch('/:bookId/categories/:id', auth, async (req, res) => {
+  const { bookId, id } = req.params;
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Category name required' });
+
+  try {
+    const { rows: catRows } = await db.query('SELECT name FROM categories WHERE id = $1 AND book_id = $2', [id, bookId]);
+    if (catRows.length === 0) return res.status(404).json({ error: 'Category not found' });
+    const oldName = catRows[0].name;
+    const newName = name.trim();
+
+    const { rows } = await db.query(
+      'UPDATE categories SET name = $1 WHERE id = $2 RETURNING *',
+      [newName, id]
+    );
+
+    await db.query(
+      'UPDATE transactions SET category = $1 WHERE book_id = $2 AND category = $3',
+      [newName, bookId, oldName]
+    );
+
+    res.json({ category: rows[0] });
+  } catch (err) {
+    console.error('[cashbooks category PATCH]', err.message);
+    res.status(500).json({ error: 'Failed to rename category' });
+  }
+});
+
+// DELETE /api/businesses/:businessId/cashbooks/:bookId/categories/:id
+router.delete('/:bookId/categories/:id', auth, async (req, res) => {
+  const { bookId, id } = req.params;
+  try {
+    await db.query('DELETE FROM categories WHERE id = $1 AND book_id = $2', [id, bookId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[cashbooks category DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to delete category' });
+  }
+});
+
+// PATCH /api/businesses/:businessId/cashbooks/:bookId/payment-modes/:id
+router.patch('/:bookId/payment-modes/:id', auth, async (req, res) => {
+  const { bookId, id } = req.params;
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Payment mode name required' });
+
+  try {
+    const { rows: pmRows } = await db.query('SELECT name FROM payment_modes WHERE id = $1 AND book_id = $2', [id, bookId]);
+    if (pmRows.length === 0) return res.status(404).json({ error: 'Payment mode not found' });
+    const oldName = pmRows[0].name;
+    const newName = name.trim();
+
+    const { rows } = await db.query(
+      'UPDATE payment_modes SET name = $1 WHERE id = $2 RETURNING *',
+      [newName, id]
+    );
+
+    await db.query(
+      'UPDATE transactions SET payment_mode = $1 WHERE book_id = $2 AND payment_mode = $3',
+      [newName, bookId, oldName]
+    );
+
+    res.json({ paymentMode: rows[0] });
+  } catch (err) {
+    console.error('[cashbooks paymentMode PATCH]', err.message);
+    res.status(500).json({ error: 'Failed to rename payment mode' });
+  }
+});
+
+// DELETE /api/businesses/:businessId/cashbooks/:bookId/payment-modes/:id
+router.delete('/:bookId/payment-modes/:id', auth, async (req, res) => {
+  const { bookId, id } = req.params;
+  try {
+    await db.query('DELETE FROM payment_modes WHERE id = $1 AND book_id = $2', [id, bookId]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('[cashbooks paymentMode DELETE]', err.message);
+    res.status(500).json({ error: 'Failed to delete payment mode' });
+  }
+});
+
 module.exports = router;
