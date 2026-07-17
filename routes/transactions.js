@@ -109,7 +109,7 @@ router.post('/upload', auth, upload.array('attachments', 4), async (req, res) =>
 // POST /api/businesses/:businessId/cashbooks/:bookId/transactions
 router.post('/', auth, async (req, res) => {
   const { businessId, bookId } = req.params;
-  const { type, amount, date, party, remarks, category, payment_mode, attachments, customFields } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments, customFields, created_at } = req.body;
   const userId = req.user.userId;
 
   if (!type || !amount || !date)
@@ -123,9 +123,9 @@ router.post('/', auth, async (req, res) => {
   try {
     const customFieldsJson = customFields && typeof customFields === 'object' ? JSON.stringify(customFields) : null;
     const { rows } = await db.query(
-      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, attachments, custom_fields, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
-      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), customFieldsJson, userId]
+      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, attachments, custom_fields, created_by, created_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, COALESCE($13, NOW())) RETURNING *`,
+      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), customFieldsJson, userId, created_at || null]
     );
     const txn = rows[0];
     const userRow = await db.query('SELECT name FROM users WHERE id = $1', [userId]);
@@ -145,16 +145,16 @@ router.patch('/:txnId', auth, async (req, res) => {
   if (!await canWriteBook(userId, businessId, bookId))
     return res.status(403).json({ error: 'Access denied' });
 
-  const { type, amount, date, party, remarks, category, payment_mode, attachments, customFields } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments, customFields, created_at } = req.body;
   if (!type || !amount || !date)
     return res.status(400).json({ error: 'type, amount, date required' });
 
   try {
     const customFieldsJson = customFields && typeof customFields === 'object' ? JSON.stringify(customFields) : null;
     const { rows } = await db.query(
-      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7, attachments=$8, custom_fields=$9
+      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7, attachments=$8, custom_fields=$9, created_at=COALESCE($12, created_at)
        WHERE id=$10 AND book_id=$11 RETURNING *`,
-      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), customFieldsJson, txnId, bookId]
+      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), customFieldsJson, txnId, bookId, created_at || null]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Transaction not found' });
     const txn = rows[0];
