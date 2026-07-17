@@ -83,7 +83,11 @@ router.get('/', auth, async (req, res) => {
        ORDER BY t.date DESC, t.created_at DESC`,
       [bookId]
     );
-    res.json({ transactions: rows, my_role: myRole });
+    const transactions = rows.map(t => ({
+      ...t,
+      customFields: t.custom_fields ? (() => { try { return JSON.parse(t.custom_fields); } catch { return {}; } })() : {},
+    }));
+    res.json({ transactions, my_role: myRole });
   } catch (err) {
     console.error('[transactions GET]', err.message);
     res.status(500).json({ error: 'Failed to fetch transactions' });
@@ -105,7 +109,7 @@ router.post('/upload', auth, upload.array('attachments', 4), async (req, res) =>
 // POST /api/businesses/:businessId/cashbooks/:bookId/transactions
 router.post('/', auth, async (req, res) => {
   const { businessId, bookId } = req.params;
-  const { type, amount, date, party, remarks, category, payment_mode, attachments } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments, customFields } = req.body;
   const userId = req.user.userId;
 
   if (!type || !amount || !date)
@@ -117,16 +121,16 @@ router.post('/', auth, async (req, res) => {
 
   const id = makeId();
   try {
-    const attachJson = attachments ? (Array.isArray(attachments) ? JSON.stringify(attachments) : attachments) : null;
+    const customFieldsJson = customFields && typeof customFields === 'object' ? JSON.stringify(customFields) : null;
     const { rows } = await db.query(
-      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, attachments, created_by)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *`,
-      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), userId]
+      `INSERT INTO transactions (id, book_id, type, amount, date, party, remarks, category, payment_mode, attachments, custom_fields, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+      [id, bookId, type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), customFieldsJson, userId]
     );
-    // Return with creator name for immediate display
     const txn = rows[0];
     const userRow = await db.query('SELECT name FROM users WHERE id = $1', [userId]);
-    res.status(201).json({ transaction: { ...txn, created_by_name: userRow.rows[0]?.name || null } });
+    const parsed = { ...txn, customFields: txn.custom_fields ? (() => { try { return JSON.parse(txn.custom_fields); } catch { return {}; } })() : {} };
+    res.status(201).json({ transaction: { ...parsed, created_by_name: userRow.rows[0]?.name || null } });
   } catch (err) {
     console.error('[transactions POST]', err.message);
     res.status(500).json({ error: 'Failed to add transaction' });
@@ -141,19 +145,21 @@ router.patch('/:txnId', auth, async (req, res) => {
   if (!await canWriteBook(userId, businessId, bookId))
     return res.status(403).json({ error: 'Access denied' });
 
-  const { type, amount, date, party, remarks, category, payment_mode, attachments } = req.body;
+  const { type, amount, date, party, remarks, category, payment_mode, attachments, customFields } = req.body;
   if (!type || !amount || !date)
     return res.status(400).json({ error: 'type, amount, date required' });
 
   try {
-    const attachJson = attachments ? (Array.isArray(attachments) ? JSON.stringify(attachments) : attachments) : null;
+    const customFieldsJson = customFields && typeof customFields === 'object' ? JSON.stringify(customFields) : null;
     const { rows } = await db.query(
-      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7, attachments=$8
-       WHERE id=$9 AND book_id=$10 RETURNING *`,
-      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), txnId, bookId]
+      `UPDATE transactions SET type=$1, amount=$2, date=$3, party=$4, remarks=$5, category=$6, payment_mode=$7, attachments=$8, custom_fields=$9
+       WHERE id=$10 AND book_id=$11 RETURNING *`,
+      [type, parseFloat(amount), date, party || null, remarks || null, category || null, payment_mode || null, toAttachmentsJson(attachments), customFieldsJson, txnId, bookId]
     );
     if (rows.length === 0) return res.status(404).json({ error: 'Transaction not found' });
-    res.json({ transaction: rows[0] });
+    const txn = rows[0];
+    const parsed = { ...txn, customFields: txn.custom_fields ? (() => { try { return JSON.parse(txn.custom_fields); } catch { return {}; } })() : {} };
+    res.json({ transaction: parsed });
   } catch (err) {
     console.error('[transactions PATCH]', err.message);
     res.status(500).json({ error: 'Failed to update transaction' });

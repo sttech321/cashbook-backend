@@ -14,8 +14,8 @@ class Transaction extends Model {
     category: 'TEXT',
     payment_mode: 'TEXT',
     attachments: 'TEXT',   // JSON array of uploaded bill URLs
+    custom_fields: 'TEXT', // JSON object of custom field values keyed by field name
     created_by: 'TEXT REFERENCES users(id) ON DELETE SET NULL',
-    attachments: 'TEXT', // JSON array of urls
     created_at: 'TEXT DEFAULT (CURRENT_TIMESTAMP)',
   };
 
@@ -26,11 +26,13 @@ class Transaction extends Model {
     ];
   }
 
-  // Add newer columns to pre-existing tables (live DB was created before `attachments`).
+  // Add newer columns to pre-existing tables.
   static async sync() {
     await super.sync();
     try { await Transaction.query('ALTER TABLE transactions ADD COLUMN attachments TEXT', []); }
-    catch { /* column already exists — safe to ignore */ }
+    catch { /* already exists */ }
+    try { await Transaction.query('ALTER TABLE transactions ADD COLUMN custom_fields TEXT', []); }
+    catch { /* already exists */ }
   }
 
   static async findByBook(bookId) {

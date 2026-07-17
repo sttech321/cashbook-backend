@@ -45,3 +45,20 @@ CREATE INDEX IF NOT EXISTS idx_transactions_book    ON transactions(book_id);
 CREATE INDEX IF NOT EXISTS idx_transactions_date    ON transactions(date DESC);
 CREATE INDEX IF NOT EXISTS idx_parties_book         ON parties(book_id);
 CREATE INDEX IF NOT EXISTS idx_businesses_user      ON businesses(user_id);
+
+CREATE TABLE IF NOT EXISTS categories (
+  id          TEXT PRIMARY KEY,
+  book_id     TEXT NOT NULL REFERENCES cashbooks(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS payment_modes (
+  id          TEXT PRIMARY KEY,
+  book_id     TEXT NOT NULL REFERENCES cashbooks(id) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_categories_book      ON categories(book_id);
+CREATE INDEX IF NOT EXISTS idx_payment_modes_book   ON payment_modes(book_id);

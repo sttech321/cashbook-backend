@@ -155,4 +155,55 @@ router.post('/:bookId/accept-invite', auth, async (req, res) => {
   }
 });
 
+// GET /api/businesses/:businessId/cashbooks/:bookId/settings
+router.get('/:bookId/settings', auth, async (req, res) => {
+  const { bookId } = req.params;
+  try {
+    const { rows: categories } = await db.query('SELECT * FROM categories WHERE book_id = $1 ORDER BY created_at ASC', [bookId]);
+    const { rows: paymentModes } = await db.query('SELECT * FROM payment_modes WHERE book_id = $1 ORDER BY created_at ASC', [bookId]);
+    res.json({ categories, paymentModes });
+  } catch (err) {
+    console.error('[cashbooks settings GET]', err.message);
+    res.status(500).json({ error: 'Failed to fetch settings' });
+  }
+});
+
+// POST /api/businesses/:businessId/cashbooks/:bookId/categories
+router.post('/:bookId/categories', auth, async (req, res) => {
+  const { bookId } = req.params;
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Category name required' });
+
+  const id = 'cat_' + Date.now() + Math.random().toString(36).slice(2, 6);
+  try {
+    const { rows } = await db.query(
+      'INSERT INTO categories (id, book_id, name) VALUES ($1, $2, $3) RETURNING *',
+      [id, bookId, name.trim()]
+    );
+    res.status(201).json({ category: rows[0] });
+  } catch (err) {
+    console.error('[cashbooks category POST]', err.message);
+    res.status(500).json({ error: 'Failed to create category' });
+  }
+});
+
+// POST /api/businesses/:businessId/cashbooks/:bookId/payment-modes
+router.post('/:bookId/payment-modes', auth, async (req, res) => {
+  const { bookId } = req.params;
+  const { name } = req.body;
+  if (!name?.trim()) return res.status(400).json({ error: 'Payment mode name required' });
+
+  const id = 'pm_' + Date.now() + Math.random().toString(36).slice(2, 6);
+  try {
+    const { rows } = await db.query(
+      'INSERT INTO payment_modes (id, book_id, name) VALUES ($1, $2, $3) RETURNING *',
+      [id, bookId, name.trim()]
+    );
+    res.status(201).json({ paymentMode: rows[0] });
+  } catch (err) {
+    console.error('[cashbooks paymentMode POST]', err.message);
+    res.status(500).json({ error: 'Failed to create payment mode' });
+  }
+});
+
 module.exports = router;

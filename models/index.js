@@ -8,6 +8,9 @@ const Party          = require('./Party');
 const BookMember     = require('./BookMember');
 const BookInvitation = require('./BookInvitation');
 
+const Category       = require('./Category');
+const PaymentMode    = require('./PaymentMode');
+
 // Sync order respects foreign-key dependencies
 const SYNC_ORDER = [
   Role,           // no deps
@@ -19,6 +22,8 @@ const SYNC_ORDER = [
   Party,          // → cashbooks
   BookMember,     // → cashbooks, users
   BookInvitation, // → cashbooks
+  Category,       // → cashbooks
+  PaymentMode,    // → cashbooks
 ];
 
 async function syncAll() {
@@ -42,5 +47,7 @@ module.exports = {
   Party,
   BookMember,
   BookInvitation,
+  Category,
+  PaymentMode,
   syncAll,
 };
