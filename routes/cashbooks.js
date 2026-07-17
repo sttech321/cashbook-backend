@@ -239,6 +239,11 @@ router.patch('/:bookId/categories/:id', auth, async (req, res) => {
 router.delete('/:bookId/categories/:id', auth, async (req, res) => {
   const { bookId, id } = req.params;
   try {
+    const { rows: catRows } = await db.query('SELECT name FROM categories WHERE id = $1 AND book_id = $2', [id, bookId]);
+    if (catRows.length > 0) {
+      const oldName = catRows[0].name;
+      await db.query('UPDATE transactions SET category = NULL WHERE book_id = $1 AND category = $2', [bookId, oldName]);
+    }
     await db.query('DELETE FROM categories WHERE id = $1 AND book_id = $2', [id, bookId]);
     res.json({ success: true });
   } catch (err) {
@@ -280,6 +285,11 @@ router.patch('/:bookId/payment-modes/:id', auth, async (req, res) => {
 router.delete('/:bookId/payment-modes/:id', auth, async (req, res) => {
   const { bookId, id } = req.params;
   try {
+    const { rows: pmRows } = await db.query('SELECT name FROM payment_modes WHERE id = $1 AND book_id = $2', [id, bookId]);
+    if (pmRows.length > 0) {
+      const oldName = pmRows[0].name;
+      await db.query('UPDATE transactions SET payment_mode = NULL WHERE book_id = $1 AND payment_mode = $2', [bookId, oldName]);
+    }
     await db.query('DELETE FROM payment_modes WHERE id = $1 AND book_id = $2', [id, bookId]);
     res.json({ success: true });
   } catch (err) {
